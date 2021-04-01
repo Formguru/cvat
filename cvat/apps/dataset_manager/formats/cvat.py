@@ -177,7 +177,7 @@ def dump_as_cvat_annotation(file_object, annotations):
     dumper.open_root()
     dumper.add_meta(annotations.meta)
 
-    for frame_annotation in annotations.group_by_frame(include_empty=True):
+    for frame_annotation in annotations.group_by_frame(include_empty=False):
         frame_id = frame_annotation.frame
         dumper.open_image(OrderedDict([
             ("id", str(frame_id)),
@@ -444,7 +444,8 @@ def load(file_object, annotations):
                     DatasetItem(id=el.attrib['name'],
                         attributes={'frame': el.attrib['id']}
                     ),
-                    task_data=annotations
+                    task_data=annotations,
+                    root_hint='images/'
                 ))
             elif el.tag in supported_shapes and (track is not None or image_is_opened):
                 attributes = []
@@ -536,13 +537,24 @@ def _export(dst_file, task_data, anno_callback, save_images=False):
             if task_data.meta['task']['mode'] == 'interpolation':
                 ext = FrameProvider.VIDEO_FRAME_EXT
 
+            frame_ids = [
+                frame_annotation.frame
+                for frame_annotation in task_data.group_by_frame(include_empty=False)
+                # ignore frames that don't have at least one "real" annotation
+                if [shape.label for shape in frame_annotation.labeled_shapes] != ['__metadata__']
+            ]
+
             img_dir = osp.join(temp_dir, 'images')
             frame_provider = FrameProvider(task_data.db_task.data)
-            frames = frame_provider.get_frames(
-                frame_provider.Quality.ORIGINAL,
-                frame_provider.Type.BUFFER)
-            for frame_id, (frame_data, _) in enumerate(frames):
+            for frame_id in sorted(frame_ids):
+                frame_data, _ = frame_provider.get_frame(
+                    frame_id,
+                    frame_provider.Quality.ORIGINAL,
+                    frame_provider.Type.BUFFER
+                )
                 frame_name = task_data.frame_info[frame_id]['path']
+                if frame_name.startswith("images/"):
+                    frame_name = frame_name[len("images/"):]
                 img_path = osp.join(img_dir, frame_name + ext)
                 os.makedirs(osp.dirname(img_path), exist_ok=True)
                 with open(img_path, 'wb') as f:
